@@ -7,10 +7,13 @@ from langgraph.graph import END, START, StateGraph
 from test_agent.graph.nodes import (
     analyze_goal,
     evaluate_result,
+    generate_assertions,
+    observe_page,
     plan_browser_action,
     reject_request,
     route_request,
     run_browser_use_agent,
+    validate_request,
     write_report,
 )
 from test_agent.graph.routing import route_after_router
@@ -22,7 +25,10 @@ def build_graph():
 
     graph = StateGraph(TestAgentState)
     graph.add_node("route_request", route_request)
+    graph.add_node("validate_request", validate_request)
     graph.add_node("analyze_goal", analyze_goal)
+    graph.add_node("observe_page", observe_page)
+    graph.add_node("generate_assertions", generate_assertions)
     graph.add_node("plan_browser_action", plan_browser_action)
     graph.add_node("browser_use", run_browser_use_agent)
     graph.add_node("evaluate_result", evaluate_result)
@@ -34,11 +40,22 @@ def build_graph():
         "route_request",
         route_after_router,
         {
-            "browser_use": "analyze_goal",
+            "validate": "validate_request",
+            "browser_use": "observe_page",
             "reject": "reject_request",
         },
     )
-    graph.add_edge("analyze_goal", "plan_browser_action")
+    graph.add_conditional_edges(
+        "validate_request",
+        route_after_router,
+        {
+            "browser_use": "observe_page",
+            "reject": "reject_request",
+        },
+    )
+    graph.add_edge("observe_page", "analyze_goal")
+    graph.add_edge("analyze_goal", "generate_assertions")
+    graph.add_edge("generate_assertions", "plan_browser_action")
     graph.add_edge("plan_browser_action", "browser_use")
     graph.add_edge("browser_use", "evaluate_result")
     graph.add_edge("evaluate_result", "write_report")

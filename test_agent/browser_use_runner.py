@@ -69,7 +69,8 @@ async def _run_browser_use_task_once(request: TestRequest, *, force_structured_o
         max_failures=3,
         source="langchain1-browser-use",
     )
-    history = await agent.run(max_steps=40)
+    max_steps = max(40, min(160, request.max_links * 4 + 20))
+    history = await agent.run(max_steps=max_steps)
 
     raw_errors = _safe_call(history, "errors", default=[]) or []
     errors = [str(error) for error in raw_errors if error is not None]
@@ -90,15 +91,17 @@ async def _run_browser_use_task_once(request: TestRequest, *, force_structured_o
 def _build_task(request: TestRequest) -> str:
     return (
         f"目标页面：{request.base_url}\n"
-        f"用户测试目标：{request.goal}\n\n"
+        f"浏览器动作上限参考：最多处理 {request.max_links} 个同类目标元素。\n"
+        f"外层状态机生成的执行任务：\n{request.goal}\n\n"
         "重要输出约束：你必须严格遵守 browser-use 系统要求的 AgentOutput JSON 格式；"
         "不要在 JSON 外输出中文说明、Markdown 或普通文本。\n\n"
         "请你作为浏览器自动化测试 Agent 完成任务：\n"
         "1. 打开目标页面。\n"
-        "2. 根据用户目标自主判断需要点击、输入、等待或检查的页面元素。\n"
-        "3. 如果目标涉及顶部导航、链接跳转、登录、表单或按钮，请真实操作浏览器验证。\n"
-        "4. 不要编造结果；如果失败，请说明卡在哪一步、页面表现和可能原因。\n"
-        "5. 在 browser-use 最终 done/result 字段里用中文总结测试结果、执行步骤、失败原因和最终 URL。"
+        "2. 严格按照外层执行任务中的测试计划和断言操作，不要自行扩大测试范围。\n"
+        "3. 每一步都基于当前页面观察决定，不要编造页面状态。\n"
+        "4. 如果任务需要处理多个同类元素，请先列出本次实际要验证的元素，再逐个验证；不要因为历史记忆改变用户本次目标。\n"
+        "5. 如果失败或无法确认，请说明卡在哪一步、页面表现、缺少什么证据。\n"
+        "6. 在 browser-use 最终 done/result 字段里用中文总结：执行步骤、断言验证结果、失败或不确定原因、最终 URL。"
     )
 
 

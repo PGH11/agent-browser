@@ -6,7 +6,8 @@ import argparse
 import sys
 
 from test_agent.graph.builder import build_graph
-from test_agent.models import BrowserUseResult, Report, TestAgentState, TestRequest
+from test_agent.history_store import load_memories
+from test_agent.models import BrowserUseResult, PageSnapshot, Report, TestAgentState, TestRequest
 from test_agent.settings import DEFAULT_BROWSER, DEFAULT_TIMEOUT_MS
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -36,6 +37,14 @@ def _initial_state(request: TestRequest) -> TestAgentState:
         "request": request,
         "route": "browser_use",
         "route_reason": "",
+        "task_type": "",
+        "test_plan": [],
+        "assertions": [],
+        "browser_instruction": "",
+        "memories": load_memories(request),
+        "page_snapshot": PageSnapshot(),
+        "observations": [],
+        "evaluation": "",
         "browser_use_result": BrowserUseResult(),
         "report": Report(passed=False, title="", markdown=""),
         "errors": [],

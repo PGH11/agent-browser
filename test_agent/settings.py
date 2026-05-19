@@ -16,6 +16,10 @@ if load_dotenv is not None:
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS_DIR = Path(os.getenv("TEST_AGENT_ARTIFACTS_DIR", PROJECT_ROOT / "artifacts"))
+TEST_HISTORY_DIR = Path(os.getenv("TEST_AGENT_HISTORY_DIR", ARTIFACTS_DIR / "test_history"))
+TEST_HISTORY_FILE = TEST_HISTORY_DIR / "history.jsonl"
+TEST_MEMORY_FILE = TEST_HISTORY_DIR / "memory.json"
+PAGE_OBSERVATION_DIR = ARTIFACTS_DIR / "page_observations"
 BROWSER_USE_DIR = ARTIFACTS_DIR / "browser_use"
 BROWSER_USE_CONFIG_DIR = Path(os.getenv("BROWSER_USE_CONFIG_DIR", BROWSER_USE_DIR / "config"))
 BROWSER_USE_PROFILES_DIR = Path(os.getenv("BROWSER_USE_PROFILES_DIR", BROWSER_USE_DIR / "profiles"))

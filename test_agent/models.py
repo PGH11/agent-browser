@@ -45,15 +45,50 @@ class Report(BaseModel):
     markdown: str
 
 
+class PageSnapshotElement(BaseModel):
+    """页面快照中的可交互元素。"""
+
+    tag: str = ""
+    role: str = ""
+    section: str = "main"
+    text: str = ""
+    href: str = ""
+    aria_label: str = ""
+    placeholder: str = ""
+    input_type: str = ""
+    visible: bool = True
+    bbox: dict[str, float] = Field(default_factory=dict)
+
+
+class PageSnapshot(BaseModel):
+    """测试计划前的页面结构快照。"""
+
+    success: bool = False
+    url: str = ""
+    title: str = ""
+    screenshot: str = ""
+    summary: str = ""
+    viewport: dict[str, int] = Field(default_factory=dict)
+    scroll: dict[str, float] = Field(default_factory=dict)
+    visible_text: list[str] = Field(default_factory=list)
+    links: list[str] = Field(default_factory=list)
+    footer_links: list[str] = Field(default_factory=list)
+    interactive_elements: list[PageSnapshotElement] = Field(default_factory=list)
+    error: str = ""
+
+
 class TestAgentState(TypedDict):
     """LangGraph 全局状态。"""
 
     request: TestRequest
-    route: Literal["browser_use", "reject"]
+    route: Literal["validate", "browser_use", "reject"]
     route_reason: str
     task_type: str
     test_plan: list[str]
+    assertions: list[str]
     browser_instruction: str
+    memories: list[str]
+    page_snapshot: PageSnapshot
     observations: list[str]
     evaluation: str
     browser_use_result: BrowserUseResult

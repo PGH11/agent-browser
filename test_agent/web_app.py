@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
-from test_agent.agent_service import AgentRunRequest, AgentRunResponse, run_frontend_agent
+from test_agent.agent_service import (
+    AgentHistoryResponse,
+    AgentRunRequest,
+    AgentRunResponse,
+    get_agent_history,
+    run_frontend_agent,
+    stream_frontend_agent,
+)
 
 
 app = FastAPI(title="Playwright 自动化测试 Agent")
@@ -19,6 +26,20 @@ def index() -> str:
 @app.post("/api/agent/run", response_model=AgentRunResponse)
 def run_agent(payload: AgentRunRequest) -> AgentRunResponse:
     return run_frontend_agent(payload)
+
+
+@app.post("/api/agent/run/stream")
+def run_agent_stream(payload: AgentRunRequest) -> StreamingResponse:
+    return StreamingResponse(
+        stream_frontend_agent(payload),
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/agent/history", response_model=AgentHistoryResponse)
+def history(limit: int = 30) -> AgentHistoryResponse:
+    return get_agent_history(limit=limit)
 
 
 FRONTEND_HTML = """
@@ -133,12 +154,76 @@ FRONTEND_HTML = """
         margin-top: 12px;
         color: var(--muted);
       }
+      .history {
+        margin-top: 16px;
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+      }
+      .history-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .link-btn {
+        width: auto;
+        padding: 0;
+        color: var(--accent);
+        background: transparent;
+        font-weight: 600;
+      }
+      .link-btn:hover { background: transparent; color: var(--accent-dark); }
+      .history-list {
+        display: grid;
+        gap: 8px;
+        max-height: 260px;
+        overflow: auto;
+      }
+      .history-item {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 9px;
+        background: #fbfcfd;
+        cursor: pointer;
+      }
+      .history-item:hover { border-color: var(--accent); }
+      .history-item strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 3px;
+      }
+      .history-meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
       .result-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
         margin-bottom: 12px;
+      }
+      .progress {
+        min-height: 150px;
+        max-height: 240px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #f8fafc;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        font-family: Consolas, "SFMono-Regular", monospace;
+        font-size: 12px;
+        color: #243447;
+      }
+      .progress-line {
+        padding: 3px 0;
+        border-bottom: 1px dashed #e6ebf0;
+      }
+      .progress-line:last-child { border-bottom: 0; }
+      .progress-node {
+        color: var(--accent);
+        font-weight: 700;
       }
       .badge {
         border-radius: 999px;
@@ -177,7 +262,7 @@ FRONTEND_HTML = """
         </div>
         <div class="field">
           <label for="instruction">测试目标</label>
-          <textarea id="instruction">测试一下这个页面的登录功能，登录凭证：lit511@qq.com、123456</textarea>
+          <textarea id="instruction" placeholder="例如：测试页面某个按钮点击后是否进入预期页面"></textarea>
         </div>
         <div class="row">
           <div class="field">
@@ -195,11 +280,21 @@ FRONTEND_HTML = """
         </div>
         <button id="runBtn">运行测试</button>
         <div id="status" class="status">等待输入</div>
+        <div class="history">
+          <div class="history-head">
+            <strong>最近测试历史</strong>
+            <button id="refreshHistory" class="link-btn" type="button">刷新</button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </div>
       </section>
       <section>
         <div class="result-head">
           <strong id="title">执行结果</strong>
           <span id="badge" class="badge">idle</span>
+        </div>
+        <div id="progress" class="progress">
+          <div class="progress-line">等待开始...</div>
         </div>
         <pre id="output"></pre>
       </section>
@@ -208,8 +303,11 @@ FRONTEND_HTML = """
       const runBtn = document.getElementById("runBtn");
       const statusEl = document.getElementById("status");
       const outputEl = document.getElementById("output");
+      const progressEl = document.getElementById("progress");
       const badgeEl = document.getElementById("badge");
       const titleEl = document.getElementById("title");
+      const historyListEl = document.getElementById("historyList");
+      const refreshHistoryBtn = document.getElementById("refreshHistory");
 
       runBtn.addEventListener("click", async () => {
         const payload = {
@@ -226,19 +324,19 @@ FRONTEND_HTML = """
         badgeEl.className = "badge";
         badgeEl.textContent = "running";
         outputEl.textContent = "";
+        progressEl.innerHTML = "";
+        appendProgress("start", "开始提交流式任务...");
 
         try {
-          const res = await fetch("/api/agent/run", {
+          const res = await fetch("/api/agent/run/stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
-          const data = await res.json();
-          titleEl.textContent = `${data.title} · ${data.route}`;
-          badgeEl.className = data.success ? "badge ok" : "badge fail";
-          badgeEl.textContent = data.success ? "PASS" : "FAIL";
-          outputEl.textContent = data.markdown || JSON.stringify(data, null, 2);
-          statusEl.textContent = "执行完成";
+          if (!res.ok || !res.body) {
+            throw new Error(`请求失败：HTTP ${res.status}`);
+          }
+          await readAgentStream(res.body);
         } catch (error) {
           badgeEl.className = "badge fail";
           badgeEl.textContent = "ERROR";
@@ -248,6 +346,133 @@ FRONTEND_HTML = """
           runBtn.disabled = false;
         }
       });
+
+      refreshHistoryBtn.addEventListener("click", loadHistory);
+
+      async function loadHistory() {
+        try {
+          const res = await fetch("/api/agent/history?limit=10");
+          const data = await res.json();
+          const items = data.items || [];
+          historyListEl.innerHTML = "";
+          if (!items.length) {
+            historyListEl.innerHTML = '<div class="history-meta">暂无历史记录</div>';
+            return;
+          }
+          for (const item of items) {
+            const el = document.createElement("div");
+            el.className = "history-item";
+            const status = item.success ? "PASS" : "FAIL";
+            const time = item.created_at ? new Date(item.created_at).toLocaleString() : "";
+            el.innerHTML = `
+              <strong>${escapeHtml(status)} · ${escapeHtml(item.task_type || "未分类")}</strong>
+              <div>${escapeHtml(item.goal || "")}</div>
+              <div class="history-meta">${escapeHtml(item.url || "")} · ${escapeHtml(time)}</div>
+            `;
+            el.addEventListener("click", () => {
+              document.getElementById("url").value = item.url || "";
+              document.getElementById("instruction").value = item.goal || "";
+              titleEl.textContent = `${item.report_title || "历史执行结果"} · ${item.route || ""}`;
+              badgeEl.className = item.success ? "badge ok" : "badge fail";
+              badgeEl.textContent = item.success ? "PASS" : "FAIL";
+              outputEl.textContent = item.report_markdown || JSON.stringify(item, null, 2);
+              statusEl.textContent = `已回填历史记录：${status}`;
+            });
+            historyListEl.appendChild(el);
+          }
+        } catch (error) {
+          historyListEl.innerHTML = `<div class="history-meta">历史加载失败：${escapeHtml(String(error))}</div>`;
+        }
+      }
+
+      async function readAgentStream(stream) {
+        const reader = stream.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            handleStreamLine(line);
+          }
+        }
+        if (buffer.trim()) {
+          handleStreamLine(buffer);
+        }
+      }
+
+      function handleStreamLine(line) {
+        if (!line.trim()) return;
+        const event = JSON.parse(line);
+        if (event.type === "progress") {
+          appendProgress(event.node || "progress", event.message || "");
+          renderProgressDetail(event);
+          statusEl.textContent = event.message || "执行中...";
+          return;
+        }
+        if (event.type === "final") {
+          const data = event.data || {};
+          titleEl.textContent = `${data.title || "执行结果"} · ${data.route || ""}`;
+          badgeEl.className = data.success ? "badge ok" : "badge fail";
+          badgeEl.textContent = data.success ? "PASS" : "FAIL";
+          outputEl.textContent = data.markdown || JSON.stringify(data, null, 2);
+          statusEl.textContent = "执行完成";
+          appendProgress("final", "最终报告已返回。");
+          loadHistory();
+          return;
+        }
+        if (event.type === "error") {
+          badgeEl.className = "badge fail";
+          badgeEl.textContent = "ERROR";
+          outputEl.textContent = event.message || JSON.stringify(event, null, 2);
+          statusEl.textContent = "执行失败";
+          appendProgress("error", event.message || "流式执行失败");
+        }
+      }
+
+      function renderProgressDetail(event) {
+        if (event.test_plan && event.test_plan.length) {
+          appendProgress("plan", event.test_plan.map((item, index) => `${index + 1}. ${item}`).join(" | "));
+        }
+        if (event.assertions && event.assertions.length) {
+          appendProgress("assert", event.assertions.map((item, index) => `${index + 1}. ${item}`).join(" | "));
+        }
+        if (event.snapshot) {
+          const s = event.snapshot;
+          appendProgress("snapshot", `标题：${s.title || "无"}，可交互元素：${s.interactive_count || 0}，链接：${s.link_count || 0}`);
+        }
+        if (event.browser_use) {
+          const b = event.browser_use;
+          appendProgress("browser", `成功：${b.success}，步数：${b.steps}，错误数：${b.error_count}`);
+        }
+        if (event.evaluation) {
+          appendProgress("evaluate", event.evaluation);
+        }
+      }
+
+      function appendProgress(node, message) {
+        const line = document.createElement("div");
+        line.className = "progress-line";
+        const time = new Date().toLocaleTimeString();
+        line.innerHTML = `<span class="progress-node">[${escapeHtml(time)} ${escapeHtml(node)}]</span> ${escapeHtml(message)}`;
+        progressEl.appendChild(line);
+        progressEl.scrollTop = progressEl.scrollHeight;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      loadHistory();
     </script>
   </body>
 </html>

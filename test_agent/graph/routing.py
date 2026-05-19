@@ -7,5 +7,5 @@ from typing import Literal
 from test_agent.models import TestAgentState
 
 
-def route_after_router(state: TestAgentState) -> Literal["browser_use", "reject"]:
+def route_after_router(state: TestAgentState) -> Literal["validate", "browser_use", "reject"]:
     return state["route"]
